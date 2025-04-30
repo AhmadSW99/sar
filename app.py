@@ -18,7 +18,8 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # تحميل النموذج المخصص
-model = YOLO('best.pt')  # <-- غير اسم الملف إذا كان مختلفًا
+model = YOLO('yolov8n.pt')  # use the tiny YOLOv8 model
+ # <-- غير اسم الملف إذا كان مختلفًا
 
 # إعداد الاتصال بـ MongoDB
 MONGO_URI = os.environ.get("MONGO_URI")  # سنضيف هذا في Render
