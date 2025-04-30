@@ -10,6 +10,7 @@ import numpy as np
 import base64
 import datetime
 import os
+import requests
 from pymongo import MongoClient
 
 # ===== Setup Flask App =====
@@ -17,10 +18,28 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
+# ===== Function to download YOLOv8 from Google Drive =====
+def download_yolo_from_drive(file_id, dest_path):
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    print(f"⬇️ Downloading YOLO model from Google Drive...")
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open(dest_path, "wb") as f:
+            f.write(response.content)
+        print("✅ Model downloaded successfully.")
+    else:
+        print(f"❌ Failed to download model. Status: {response.status_code}")
+
 # ===== Load YOLO Model Safely =====
+MODEL_PATH = "yolov8n.pt"
+DRIVE_FILE_ID = "1T6MVvKaQ5VRQ6kXcypsn-UrFAyIivewW"  # <- Your model's file ID
+
 try:
+    if not os.path.exists(MODEL_PATH):
+        download_yolo_from_drive(DRIVE_FILE_ID, MODEL_PATH)
+
     print("🟡 Loading YOLOv8 model...")
-    model = YOLO('yolov8n.pt')  # Use yolov8n.pt for fast loading
+    model = YOLO(MODEL_PATH)
     print("✅ YOLOv8 model loaded successfully.")
 except Exception as e:
     print(f"❌ Failed to load YOLO model: {e}")
