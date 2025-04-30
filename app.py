@@ -12,25 +12,40 @@ import datetime
 import os
 from pymongo import MongoClient
 
-# إعداد Flask
+# ===== Setup Flask App =====
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
-# تحميل النموذج المخصص
-model = YOLO('yolov8n.pt')  # use the tiny YOLOv8 model
- # <-- غير اسم الملف إذا كان مختلفًا
+# ===== Load YOLO Model Safely =====
+try:
+    print("🟡 Loading YOLOv8 model...")
+    model = YOLO('yolov8n.pt')  # Use yolov8n.pt for fast loading
+    print("✅ YOLOv8 model loaded successfully.")
+except Exception as e:
+    print(f"❌ Failed to load YOLO model: {e}")
+    model = None
 
-# إعداد الاتصال بـ MongoDB
-MONGO_URI = os.environ.get("MONGO_URI")  # سنضيف هذا في Render
-client = MongoClient(MONGO_URI)
-db = client["ai-desert"]
-collection = db["detections"]
+# ===== Connect to MongoDB =====
+try:
+    MONGO_URI = os.environ.get("MONGO_URI")
+    client = MongoClient(MONGO_URI)
+    db = client["ai-desert"]
+    collection = db["detections"]
+    print("✅ Connected to MongoDB.")
+except Exception as e:
+    print(f"❌ MongoDB connection failed: {e}")
+    collection = None
 
-# معالجة الصور عبر WebSocket
+# ===== WebSocket Upload Event =====
 @socketio.on('upload_image')
 def handle_upload_image(data):
-    print("✅ Received image from client")
+    print("📥 Received image from frontend.")
+
+    if model is None:
+        emit('error', {'message': 'YOLO model not loaded'})
+        print("❌ No model available.")
+        return
 
     try:
         image_data_base64 = data.get('image')
@@ -43,11 +58,14 @@ def handle_upload_image(data):
 
         if frame is None:
             emit('error', {'message': 'Failed to decode image'})
+            print("❌ Frame decoding failed.")
             return
 
+        print("🎯 Running YOLO prediction...")
         result = model.predict(frame, verbose=False, conf=0.4)
+        print("✅ Prediction completed.")
 
-        # رسم الصناديق
+        # Draw boxes
         annotated_frame = frame.copy()
         if result and result[0] and result[0].boxes:
             for box in result[0].boxes:
@@ -58,30 +76,37 @@ def handle_upload_image(data):
         _, buffer = cv2.imencode('.jpg', annotated_frame)
         processed_base64 = base64.b64encode(buffer).decode('utf-8')
 
-        # حفظ البيانات في قاعدة البيانات
-        collection.insert_one({
-            "timestamp": datetime.datetime.utcnow(),
-            "boxes_detected": len(result[0].boxes) if result and result[0].boxes else 0,
-            "image": processed_base64
-        })
+        # Save to DB
+        if collection:
+            collection.insert_one({
+                "timestamp": datetime.datetime.utcnow(),
+                "boxes_detected": len(result[0].boxes) if result and result[0].boxes else 0,
+                "image": processed_base64
+            })
+            print("✅ Image and data saved to MongoDB.")
 
         emit('processed_image', {'image': f"data:image/jpeg;base64,{processed_base64}"})
+        print("📤 Processed image sent to frontend.")
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error during processing: {e}")
         emit('error', {'message': str(e)})
 
+# ===== WebSocket Events =====
 @socketio.on('connect')
 def handle_connect():
-    print('🔌 Client connected!')
+    print("🔌 Frontend connected via WebSocket.")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print('⚠️ Client disconnected.')
+    print("⚠️ Frontend disconnected.")
 
+# ===== Health Check Route =====
 @app.route('/')
 def index():
     return "🟢 YOLOv8 WebSocket server with MongoDB is running."
 
+# ===== Start Server =====
 if __name__ == "__main__":
+    print("🚀 Starting Flask WebSocket server on port 5005...")
     socketio.run(app, host="0.0.0.0", port=5005)
